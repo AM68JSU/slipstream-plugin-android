@@ -1,5 +1,5 @@
 
-name: Build APK (ARM64 Final)
+name: Build APK (Stable Low Memory)
 
 on:
   push:
@@ -9,6 +9,13 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    
+    # تنظیمات حیاتی برای مدیریت حافظه
+    env:
+      # محدود کردن حافظه جاوا به 2.5 گیگابایت تا فضا برای Rust باقی بماند
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx2560m -Dorg.gradle.daemon=false -Dkotlin.daemon.jvm.options=-Xmx1024m"
+      # جلوگیری از کامپایل همزمان چندین فایل Rust برای کاهش فشار روی رم
+      CARGO_BUILD_JOBS: 1
 
     steps:
     # 1. دانلود سورس‌کد
@@ -27,7 +34,7 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
-    # 4. نصب ابزارهای مورد نیاز
+    # 4. نصب ابزارهای بیلد (Python هم اضافه شد)
     - name: Install Build Dependencies
       run: |
         sudo apt-get update
@@ -45,54 +52,66 @@ jobs:
         yes | sdkmanager --install "ndk;26.1.10909125"
         echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
 
-    # 7. اصلاح فایل build.gradle.kts با اسکریپت پایتون (تضمینی)
-    # این روش بسیار دقیق‌تر از sed عمل می‌کند و از خرابی فایل جلوگیری می‌کند
+    # 7. ساخت فایل‌های تنظیمات برای کاهش فشار روی سرور
+    # ما فایل gradle.properties را می‌سازیم تا موازی‌سازی را محدود کنیم
+    - name: Configure Memory Settings
+      run: |
+        # ساخت local.properties
+        echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+        echo "ndk.dir=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> local.properties
+        
+        # ساخت gradle.properties برای محدود کردن مصرف منابع
+        echo "org.gradle.jvmargs=-Xmx2560m" >> gradle.properties
+        echo "org.gradle.parallel=false" >> gradle.properties
+        echo "org.gradle.daemon=false" >> gradle.properties
+        echo "org.gradle.caching=false" >> gradle.properties
+        # محدود کردن تعداد Worker ها به 2 (چون سرورهای گیت‌هاب معمولا 2 هسته دارند)
+        echo "org.gradle.workers.max=2" >> gradle.properties
+
+    # 8. اصلاح فایل build.gradle.kts با پایتون (رفع تداخل)
     - name: Fix build.gradle.kts logic
       shell: python
       run: |
         import re
+        import os
         
         file_path = "app/build.gradle.kts"
-        print(f"Reading {file_path}...")
         
-        with open(file_path, "r") as f:
-            content = f.read()
+        if os.path.exists(file_path):
+            with open(file_path, "r") as f:
+                content = f.read()
+                
+            # غیرفعال کردن Splits
+            content = content.replace('isEnable = true', 'isEnable = false')
+            content = re.sub(r'(include\s*\()', r'// \1', content)
             
-        # 1. غیرفعال کردن Splits (علت اصلی تداخل)
-        # هر جا include(...) دیدیم کامنت می‌کنیم تا تداخل رفع شود
-        content = re.sub(r'include\s*\(', '// include(', content)
-        # ویژگی isEnable را فالس می‌کنیم
-        content = content.replace('isEnable = true', 'isEnable = false')
-        
-        # 2. تنظیم نسخه NDK
-        content = re.sub(r'ndkVersion\s*=.*', 'ndkVersion = "26.1.10909125"', content)
-        
-        # 3. اضافه کردن تنظیمات ARM64 به defaultConfig
-        if 'abiFilters.add("arm64-v8a")' not in content:
-            # این دستور ndk {...} را به ابتدای defaultConfig تزریق می‌کند
-            replacement = 'defaultConfig {\n        ndk {\n            abiFilters.add("arm64-v8a")\n        }'
-            content = content.replace('defaultConfig {', replacement)
+            # تنظیم نسخه NDK
+            content = re.sub(r'ndkVersion\s*=.*', 'ndkVersion = "26.1.10909125"', content)
             
-        print("Writing modified content...")
-        with open(file_path, "w") as f:
-            f.write(content)
-            
-        print("Fix applied successfully!")
+            # اضافه کردن فیلتر ARM64
+            if 'abiFilters.add("arm64-v8a")' not in content:
+                pattern = r'(defaultConfig\s*\{)'
+                replacement = r'\1\n        ndk { abiFilters.add("arm64-v8a") }'
+                content = re.sub(pattern, replacement, content)
+                
+            with open(file_path, "w") as f:
+                f.write(content)
+            print("Done modifying build file.")
 
-    # 8. نصب Rust برای معماری ARM64
+    # 9. نصب Rust برای معماری ARM64
     - name: Install Rust Targets
       run: rustup target add aarch64-linux-android
 
-    # 9. مجوز اجرا
+    # 10. مجوز اجرا
     - name: Grant execute permission
       run: chmod +x gradlew
 
-    # 10. ساخت فایل APK
-    # فلگ --stacktrace برای دیدن جزئیات خطای احتمالی
+    # 11. ساخت فایل APK
+    # گزینه --no-parallel بسیار مهم است
     - name: Build Debug APK
-      run: ./gradlew assembleDebug --stacktrace
+      run: ./gradlew assembleDebug --no-daemon --no-parallel --stacktrace
 
-    # 11. آپلود فایل خروجی
+    # 12. آپلود فایل خروجی
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
