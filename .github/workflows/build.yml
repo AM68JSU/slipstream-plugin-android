@@ -40,7 +40,7 @@ jobs:
     # نصب NDK نسخه 26 (پایدار برای Rust/OpenSSL)
     - name: Install NDK
       run: |
-        yes | sdkmanager --install "ndk;26.1.10909125"
+        yes | sdkmanager --install "ndk;27.2.12479018"
         echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
 
     # اصلاح فایل build.gradle برای قبول کردن NDK 26
