@@ -1,3 +1,4 @@
+
 name: Build APK
 
 on:
@@ -22,18 +23,31 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
-    # نصب ابزارهای حیاتی که در سرورهای گیت‌هاب نیستند
-    # وجود nasm و ninja برای بیلد شدن OpenSSL با NDK 27 ضروری است
+    # نصب ابزارهای بیلد ضروری
     - name: Install Build Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y ninja-build nasm pkg-config build-essential clang
+        sudo apt-get install -y ninja-build nasm pkg-config build-essential
 
-    # برگشت به نسخه 27.2 که پروژه درخواست کرده است
+    # نصب CMake مخصوص اندروید (نسخه 3.22.1)
+    # این کار باعث می‌شود از CMake 3.31 سیستم که مشکل‌ساز است استفاده نشود
+    - name: Install Android CMake
+      run: |
+        sdkmanager --install "cmake;3.22.1"
+        echo "ANDROID_CMAKE_BIN=$ANDROID_SDK_ROOT/cmake/3.22.1/bin" >> $GITHUB_ENV
+        echo "$ANDROID_SDK_ROOT/cmake/3.22.1/bin" >> $GITHUB_PATH
+
+    # نصب NDK نسخه 26 (پایدار برای Rust/OpenSSL)
     - name: Install NDK
       run: |
-        yes | sdkmanager --install "ndk;27.2.12479018"
-        echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> $GITHUB_ENV
+        yes | sdkmanager --install "ndk;26.1.10909125"
+        echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
+
+    # اصلاح فایل build.gradle برای قبول کردن NDK 26
+    # این دستور عدد 27.x را در فایل پیدا کرده و با 26.1 جایگزین می‌کند
+    - name: Downgrade NDK version in build.gradle
+      run: |
+        sed -i 's/ndkVersion .*/ndkVersion "26.1.10909125"/' app/build.gradle
 
     - name: Install Rust Targets
       run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
@@ -48,4 +62,4 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: apk
-        path: app/build/outputs/apk/debug/*.ap
+        path: app/build/outputs/apk/debug/*.apk
