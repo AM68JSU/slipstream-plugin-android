@@ -10,54 +10,58 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    # 1. دانلود کد پروژه (مهم‌ترین مرحله که باید اول باشد)
     - uses: actions/checkout@v4
       with:
         submodules: 'recursive'
 
+    # 2. نصب جاوا
     - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
         distribution: temurin
         java-version: 17
 
+    # 3. نصب SDK اندروید
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
-    # نصب ابزارهای بیلد ضروری
+    # 4. نصب ابزارهای بیلد C++ و OpenSSL
     - name: Install Build Dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y ninja-build nasm pkg-config build-essential
 
-    # نصب CMake مخصوص اندروید (نسخه 3.22.1)
-    # این کار باعث می‌شود از CMake 3.31 سیستم که مشکل‌ساز است استفاده نشود
+    # 5. نصب نسخه پایدار CMake
     - name: Install Android CMake
       run: |
         sdkmanager --install "cmake;3.22.1"
-        echo "ANDROID_CMAKE_BIN=$ANDROID_SDK_ROOT/cmake/3.22.1/bin" >> $GITHUB_ENV
         echo "$ANDROID_SDK_ROOT/cmake/3.22.1/bin" >> $GITHUB_PATH
 
-    # نصب NDK نسخه 26 (پایدار برای Rust/OpenSSL)
+    # 6. نصب نسخه پایدار NDK
     - name: Install NDK
       run: |
-        yes | sdkmanager --install "ndk;27.2.12479018"
+        yes | sdkmanager --install "ndk;26.1.10909125"
         echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
 
-    # اصلاح فایل build.gradle برای قبول کردن NDK 26
-    # این دستور عدد 27.x را در فایل پیدا کرده و با 26.1 جایگزین می‌کند
+    # 7. اصلاح فایل build.gradle (حالا که دانلود شده، این دستور کار می‌کند)
     - name: Downgrade NDK version in build.gradle
       run: |
         sed -i 's/ndkVersion .*/ndkVersion "26.1.10909125"/' app/build.gradle
 
+    # 8. نصب ابزارهای Rust برای اندروید
     - name: Install Rust Targets
       run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
 
+    # 9. دادن مجوز اجرا به اسکریپت بیلد
     - name: Grant execute permission
       run: chmod +x gradlew
 
+    # 10. ساخت فایل APK
     - name: Build Debug APK
       run: ./gradlew assembleDebug
 
+    # 11. آپلود فایل نهایی
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
