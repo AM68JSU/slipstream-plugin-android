@@ -9,7 +9,6 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # این مرحله کد شما را به همراه ساب‌ماژول‌ها (کدهای Rust) دانلود می‌کند
     - uses: actions/checkout@v4
       with:
         submodules: 'recursive'
@@ -27,6 +26,12 @@ jobs:
       run: |
         yes | sdkmanager --install "ndk;27.2.12479018"
         echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> $GITHUB_ENV
+
+    # --- بخش جدید اضافه شده ---
+    # این دستور به Rust یاد می‌دهد که چگونه برای پردازنده‌های مختلف اندروید خروجی بگیرد
+    - name: Install Rust Targets
+      run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
+    # -------------------------
 
     - name: Grant execute permission
       run: chmod +x gradlew
