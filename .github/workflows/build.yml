@@ -1,5 +1,5 @@
 
-name: Build APK (ARM64 Only)
+name: Build APK (ARM64 Fixed)
 
 on:
   push:
@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # 1. دانلود سورس‌کد پروژه
+    # 1. دانلود سورس‌کد
     - uses: actions/checkout@v4
       with:
         submodules: 'recursive'
@@ -27,7 +27,7 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
-    # 4. نصب ابزارهای سیستم عامل
+    # 4. نصب ابزارهای مورد نیاز سیستم
     - name: Install Build Dependencies
       run: |
         sudo apt-get update
@@ -45,33 +45,38 @@ jobs:
         yes | sdkmanager --install "ndk;26.1.10909125"
         echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
 
-    # 7. اصلاح اتوماتیک فایل build.gradle.kts
-    # این مرحله تداخل splits را حل کرده و فقط arm64 را فعال می‌کند
+    # 7. اصلاح هوشمند فایل build.gradle.kts
+    # استراتژی: غیرفعال کردن Splits به جای حذف آن و اضافه کردن فیلتر ARM64
     - name: Configure build.gradle.kts
       run: |
-        echo "Fixing build.gradle.kts configurations..."
+        echo "Modifying build.gradle.kts..."
         
-        # 1. تنظیم نسخه صحیح NDK
+        # تنظیم نسخه NDK
         sed -i 's/ndkVersion.*/ndkVersion = "26.1.10909125"/' app/build.gradle.kts
         
-        # 2. حذف خطی که باعث تداخل می‌شود (include های قدیمی داخل splits)
-        # دستور زیر هر خطی که شامل "include" و "armeabi" باشد را پاک می‌کند
-        sed -i '/include.*armeabi.*x86.*/d' app/build.gradle.kts
+        # غیرفعال کردن Splits (تغییر true به false)
+        # این کار باعث می‌شود تنظیمات splits نادیده گرفته شود و تداخل حل شود
+        sed -i 's/isEnable = true/isEnable = false/g' app/build.gradle.kts
         
-        # 3. اضافه کردن فیلتر فقط برای ARM64 در defaultConfig
-        sed -i '/defaultConfig {/a \        ndk { abiFilters += "arm64-v8a" }' app/build.gradle.kts
+        # اضافه کردن فیلتر ARM64 به بخش defaultConfig
+        # از دستور add استفاده می‌کنیم که در کاتلین مطمئن‌تر است
+        sed -i '/defaultConfig {/a \        ndk { abiFilters.add("arm64-v8a") }' app/build.gradle.kts
+        
+        # چاپ محتویات فایل برای اطمینان از صحت تغییرات (فقط جهت دیباگ در لاگ‌ها)
+        cat app/build.gradle.kts | grep -A 5 "defaultConfig"
 
     # 8. نصب Rust برای معماری ARM64
     - name: Install Rust Targets
       run: rustup target add aarch64-linux-android
 
-    # 9. مجوز اجرا به گریدل
+    # 9. مجوز اجرا
     - name: Grant execute permission
       run: chmod +x gradlew
 
-    # 10. ساخت فایل APK
+    # 10. ساخت فایل APK با لاگ کامل
+    # --info کمک می‌کند اگر خطایی باشد دقیقاً متن آن را ببینیم
     - name: Build Debug APK
-      run: ./gradlew assembleDebug --stacktrace
+      run: ./gradlew assembleDebug --info --stacktrace
 
     # 11. آپلود فایل خروجی
     - name: Upload APK
