@@ -23,23 +23,18 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
-    # نصب تمام ابزارهای لازم برای بیلد C++ و OpenSSL
+    # نصب ابزارهای حیاتی که در سرورهای گیت‌هاب نیستند
+    # وجود nasm و ninja برای بیلد شدن OpenSSL با NDK 27 ضروری است
     - name: Install Build Dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y ninja-build nasm pkg-config build-essential clang
 
-    # استفاده از نسخه پایدار NDK (نسخه 26 به جای 27)
+    # برگشت به نسخه 27.2 که پروژه درخواست کرده است
     - name: Install NDK
       run: |
-        yes | sdkmanager --install "ndk;26.1.10909125"
-        echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
-
-    # ایجاد فایل تنظیمات محلی برای اطمینان از شناسایی NDK توسط گریدل
-    - name: Create local.properties
-      run: |
-        echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
-        echo "ndk.dir=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> local.properties
+        yes | sdkmanager --install "ndk;27.2.12479018"
+        echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> $GITHUB_ENV
 
     - name: Install Rust Targets
       run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
@@ -54,4 +49,4 @@ jobs:
       uses: actions/upload-artifact@v4
       with:
         name: apk
-        path: app/build/outputs/apk/debug/*.apk
+        path: app/build/outputs/apk/debug/*.ap
