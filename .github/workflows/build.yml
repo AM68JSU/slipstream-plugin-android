@@ -22,16 +22,19 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
+    # نصب ابزارهای بیلد ضروری برای کامپایل کدهای C/C++ و OpenSSL
+    - name: Install Build Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ninja-build nasm
+
     - name: Install NDK
       run: |
         yes | sdkmanager --install "ndk;27.2.12479018"
         echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> $GITHUB_ENV
 
-    # --- بخش جدید اضافه شده ---
-    # این دستور به Rust یاد می‌دهد که چگونه برای پردازنده‌های مختلف اندروید خروجی بگیرد
     - name: Install Rust Targets
       run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
-    # -------------------------
 
     - name: Grant execute permission
       run: chmod +x gradlew
