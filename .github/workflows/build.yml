@@ -1,5 +1,5 @@
 
-name: Build APK (ARM64 Fixed)
+name: Build APK (ARM64 Final)
 
 on:
   push:
@@ -27,11 +27,11 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
-    # 4. نصب ابزارهای مورد نیاز سیستم
+    # 4. نصب ابزارهای مورد نیاز
     - name: Install Build Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y ninja-build nasm pkg-config build-essential
+        sudo apt-get install -y ninja-build nasm pkg-config build-essential python3
 
     # 5. نصب CMake
     - name: Install Android CMake
@@ -45,25 +45,39 @@ jobs:
         yes | sdkmanager --install "ndk;26.1.10909125"
         echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
 
-    # 7. اصلاح هوشمند فایل build.gradle.kts
-    # استراتژی: غیرفعال کردن Splits به جای حذف آن و اضافه کردن فیلتر ARM64
-    - name: Configure build.gradle.kts
+    # 7. اصلاح فایل build.gradle.kts با اسکریپت پایتون (تضمینی)
+    # این روش بسیار دقیق‌تر از sed عمل می‌کند و از خرابی فایل جلوگیری می‌کند
+    - name: Fix build.gradle.kts logic
+      shell: python
       run: |
-        echo "Modifying build.gradle.kts..."
+        import re
         
-        # تنظیم نسخه NDK
-        sed -i 's/ndkVersion.*/ndkVersion = "26.1.10909125"/' app/build.gradle.kts
+        file_path = "app/build.gradle.kts"
+        print(f"Reading {file_path}...")
         
-        # غیرفعال کردن Splits (تغییر true به false)
-        # این کار باعث می‌شود تنظیمات splits نادیده گرفته شود و تداخل حل شود
-        sed -i 's/isEnable = true/isEnable = false/g' app/build.gradle.kts
+        with open(file_path, "r") as f:
+            content = f.read()
+            
+        # 1. غیرفعال کردن Splits (علت اصلی تداخل)
+        # هر جا include(...) دیدیم کامنت می‌کنیم تا تداخل رفع شود
+        content = re.sub(r'include\s*\(', '// include(', content)
+        # ویژگی isEnable را فالس می‌کنیم
+        content = content.replace('isEnable = true', 'isEnable = false')
         
-        # اضافه کردن فیلتر ARM64 به بخش defaultConfig
-        # از دستور add استفاده می‌کنیم که در کاتلین مطمئن‌تر است
-        sed -i '/defaultConfig {/a \        ndk { abiFilters.add("arm64-v8a") }' app/build.gradle.kts
+        # 2. تنظیم نسخه NDK
+        content = re.sub(r'ndkVersion\s*=.*', 'ndkVersion = "26.1.10909125"', content)
         
-        # چاپ محتویات فایل برای اطمینان از صحت تغییرات (فقط جهت دیباگ در لاگ‌ها)
-        cat app/build.gradle.kts | grep -A 5 "defaultConfig"
+        # 3. اضافه کردن تنظیمات ARM64 به defaultConfig
+        if 'abiFilters.add("arm64-v8a")' not in content:
+            # این دستور ndk {...} را به ابتدای defaultConfig تزریق می‌کند
+            replacement = 'defaultConfig {\n        ndk {\n            abiFilters.add("arm64-v8a")\n        }'
+            content = content.replace('defaultConfig {', replacement)
+            
+        print("Writing modified content...")
+        with open(file_path, "w") as f:
+            f.write(content)
+            
+        print("Fix applied successfully!")
 
     # 8. نصب Rust برای معماری ARM64
     - name: Install Rust Targets
@@ -73,10 +87,10 @@ jobs:
     - name: Grant execute permission
       run: chmod +x gradlew
 
-    # 10. ساخت فایل APK با لاگ کامل
-    # --info کمک می‌کند اگر خطایی باشد دقیقاً متن آن را ببینیم
+    # 10. ساخت فایل APK
+    # فلگ --stacktrace برای دیدن جزئیات خطای احتمالی
     - name: Build Debug APK
-      run: ./gradlew assembleDebug --info --stacktrace
+      run: ./gradlew assembleDebug --stacktrace
 
     # 11. آپلود فایل خروجی
     - name: Upload APK
