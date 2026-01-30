@@ -1,3 +1,4 @@
+
 name: Build APK
 
 on:
@@ -22,16 +23,23 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
-    # نصب ابزارهای بیلد ضروری برای کامپایل کدهای C/C++ و OpenSSL
+    # نصب تمام ابزارهای لازم برای بیلد C++ و OpenSSL
     - name: Install Build Dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y ninja-build nasm
+        sudo apt-get install -y ninja-build nasm pkg-config build-essential clang
 
+    # استفاده از نسخه پایدار NDK (نسخه 26 به جای 27)
     - name: Install NDK
       run: |
-        yes | sdkmanager --install "ndk;27.2.12479018"
-        echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> $GITHUB_ENV
+        yes | sdkmanager --install "ndk;26.1.10909125"
+        echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
+
+    # ایجاد فایل تنظیمات محلی برای اطمینان از شناسایی NDK توسط گریدل
+    - name: Create local.properties
+      run: |
+        echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
+        echo "ndk.dir=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> local.properties
 
     - name: Install Rust Targets
       run: rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android i686-linux-android
