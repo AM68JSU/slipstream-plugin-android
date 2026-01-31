@@ -1,4 +1,4 @@
-name: Build APK (Memory Optimized)
+name: Build APK (Swap Enabled)
 
 on:
   push:
@@ -8,81 +8,96 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
-    # تنظیمات حیاتی برای مدیریت حافظه
+
     env:
-      # محدود کردن حافظه جاوا و غیرفعال کردن Daemon
-      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx3072m -Dorg.gradle.daemon=false"
-      # جلوگیری از کامپایل همزمان چندین فایل Rust برای کاهش فشار روی رم (بسیار مهم)
+      # محدود کردن شدید حافظه جاوا به 2 گیگابایت (تا 5 گیگ برای Rust و سیستم بماند)
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx2048m -Dorg.gradle.daemon=false -Dkotlin.daemon.jvm.options=-Xmx1024m"
+      # تک‌هسته‌ای کردن کامپایل Rust
       CARGO_BUILD_JOBS: "1"
+      # کاهش مصرف رم کامپایلر Rust
+      RUSTFLAGS: "-C codegen-units=1"
 
     steps:
-    # 1. دانلود سورس‌کد
+    # 1. ایجاد حافظه مجازی (SWAP) - راه نجات از کرش کردن
+    - name: Enable Swap Space
+      run: |
+        sudo fallocate -l 4G /swapfile
+        sudo chmod 600 /swapfile
+        sudo mkswap /swapfile
+        sudo swapon /swapfile
+        sudo swapon --show
+
+    # 2. دانلود سورس‌کد
     - uses: actions/checkout@v4
       with:
         submodules: 'recursive'
 
-    # 2. نصب جاوا 17
+    # 3. نصب جاوا 17
     - name: Set up JDK 17
       uses: actions/setup-java@v4
       with:
         distribution: temurin
         java-version: 17
 
-    # 3. نصب SDK اندروید
+    # 4. نصب SDK اندروید
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
-    # 4. نصب ابزارهای پیش‌نیاز
+    # 5. نصب ابزارهای بیلد
     - name: Install Build Dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y ninja-build nasm pkg-config build-essential python3
 
-    # 5. نصب CMake پایدار
+    # 6. نصب CMake پایدار
     - name: Install Android CMake
       run: |
         sdkmanager --install "cmake;3.22.1"
         echo "$ANDROID_SDK_ROOT/cmake/3.22.1/bin" >> $GITHUB_PATH
 
-    # 6. نصب NDK پایدار
+    # 7. نصب NDK پایدار
     - name: Install NDK
       run: |
         yes | sdkmanager --install "ndk;26.1.10909125"
         echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
 
-    # 7. اصلاح فایل build.gradle.kts با پایتون
+    # 8. اصلاح فایل build.gradle.kts با پایتون
     - name: Fix build.gradle.kts
       shell: python
       run: |
         import re
         file_path = "app/build.gradle.kts"
-        with open(file_path, "r") as f: content = f.read()
         
-        # 1. تغییر نسخه NDK
+        with open(file_path, "r") as f:
+            content = f.read()
+        
+        # اصلاح نسخه NDK
         content = re.sub(r'ndkVersion\s*=\s*".*"', 'ndkVersion = "26.1.10909125"', content)
-        # 2. غیرفعال کردن Splits
+        
+        # غیرفعال کردن Splits (بسیار مهم)
         content = content.replace('isEnable = true', 'isEnable = false')
-        # 3. اضافه کردن فیلتر ARM64
+        
+        # اضافه کردن فیلتر ARM64 اگر وجود نداشته باشد
         if 'abiFilters' not in content:
             content = content.replace('defaultConfig {', 'defaultConfig {\n        ndk { abiFilters += "arm64-v8a" }')
+            
+        with open(file_path, "w") as f:
+            f.write(content)
+        print("Build file patched successfully.")
 
-        with open(file_path, "w") as f: f.write(content)
-        print("Build file modified for ARM64 and NDK26.")
-
-    # 8. نصب Rust فقط برای ARM64
+    # 9. نصب Rust فقط برای ARM64
     - name: Install Rust Targets
       run: rustup target add aarch64-linux-android
 
-    # 9. مجوز اجرا
+    # 10. مجوز اجرا
     - name: Grant execute permission
       run: chmod +x gradlew
 
-    # 10. ساخت فایل APK با تنظیمات ضد-کرش
+    # 11. ساخت فایل APK (بدون پارالل برای کاهش مصرف رم)
     - name: Build Debug APK
       run: ./gradlew assembleDebug --no-parallel --stacktrace
 
-    # 11. آپلود فایل نهایی
+    # 12. آپلود فایل
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
