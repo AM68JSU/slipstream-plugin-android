@@ -1,4 +1,4 @@
-name: Build APK (Stable Low Memory)
+name: Build APK (ARM64 Fixed)
 
 on:
   push:
@@ -8,13 +8,10 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    
-    # تنظیمات حیاتی برای مدیریت حافظه
+
+    # تنظیمات برای مدیریت حافظه و جلوگیری از کرش کردن
     env:
-      # محدود کردن حافظه جاوا به 2.5 گیگابایت تا فضا برای Rust باقی بماند
-      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx2560m -Dorg.gradle.daemon=false -Dkotlin.daemon.jvm.options=-Xmx1024m"
-      # جلوگیری از کامپایل همزمان چندین فایل Rust برای کاهش فشار روی رم
-      CARGO_BUILD_JOBS: 1
+      GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx3072m -Dorg.gradle.daemon=false"
 
     steps:
     # 1. دانلود سورس‌کد
@@ -33,84 +30,66 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
-    # 4. نصب ابزارهای بیلد (Python هم اضافه شد)
+    # 4. نصب ابزارهای پیش‌نیاز (ninja, nasm, python)
     - name: Install Build Dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y ninja-build nasm pkg-config build-essential python3
 
-    # 5. نصب CMake
+    # 5. نصب CMake پایدار (3.22.1)
     - name: Install Android CMake
       run: |
         sdkmanager --install "cmake;3.22.1"
         echo "$ANDROID_SDK_ROOT/cmake/3.22.1/bin" >> $GITHUB_PATH
 
-    # 6. نصب NDK 26
+    # 6. نصب NDK پایدار (نسخه 26)
     - name: Install NDK
       run: |
         yes | sdkmanager --install "ndk;26.1.10909125"
         echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
 
-    # 7. ساخت فایل‌های تنظیمات برای کاهش فشار روی سرور
-    # ما فایل gradle.properties را می‌سازیم تا موازی‌سازی را محدود کنیم
-    - name: Configure Memory Settings
-      run: |
-        # ساخت local.properties
-        echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
-        echo "ndk.dir=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> local.properties
-        
-        # ساخت gradle.properties برای محدود کردن مصرف منابع
-        echo "org.gradle.jvmargs=-Xmx2560m" >> gradle.properties
-        echo "org.gradle.parallel=false" >> gradle.properties
-        echo "org.gradle.daemon=false" >> gradle.properties
-        echo "org.gradle.caching=false" >> gradle.properties
-        # محدود کردن تعداد Worker ها به 2 (چون سرورهای گیت‌هاب معمولا 2 هسته دارند)
-        echo "org.gradle.workers.max=2" >> gradle.properties
-
-    # 8. اصلاح فایل build.gradle.kts با پایتون (رفع تداخل)
-    - name: Fix build.gradle.kts logic
+    # 7. اصلاح فایل build.gradle.kts با پایتون (حیاتی‌ترین مرحله)
+    # این اسکریپت تداخل splits را حل می‌کند و نسخه NDK را اصلاح می‌کند
+    - name: Fix build.gradle.kts
       shell: python
       run: |
         import re
-        import os
         
         file_path = "app/build.gradle.kts"
         
-        if os.path.exists(file_path):
-            with open(file_path, "r") as f:
-                content = f.read()
-                
-            # غیرفعال کردن Splits
-            content = content.replace('isEnable = true', 'isEnable = false')
-            content = re.sub(r'(include\s*\()', r'// \1', content)
-            
-            # تنظیم نسخه NDK
-            content = re.sub(r'ndkVersion\s*=.*', 'ndkVersion = "26.1.10909125"', content)
-            
-            # اضافه کردن فیلتر ARM64
-            if 'abiFilters.add("arm64-v8a")' not in content:
-                pattern = r'(defaultConfig\s*\{)'
-                replacement = r'\1\n        ndk { abiFilters.add("arm64-v8a") }'
-                content = re.sub(pattern, replacement, content)
-                
-            with open(file_path, "w") as f:
-                f.write(content)
-            print("Done modifying build file.")
+        with open(file_path, "r") as f:
+            content = f.read()
+        
+        # 1. تغییر نسخه NDK به 26
+        content = re.sub(r'ndkVersion\s*=\s*".*"', 'ndkVersion = "26.1.10909125"', content)
+        
+        # 2. غیرفعال کردن Splits (حل مشکل Conflicting configuration)
+        # در فایل اصلی isEnable = true است، ما آن را false می‌کنیم
+        content = content.replace('isEnable = true', 'isEnable = false')
+        
+        # 3. اضافه کردن تنظیمات ARM64 به defaultConfig
+        if 'abiFilters' not in content:
+            # پیدا کردن انتهای بلاک defaultConfig و اضافه کردن ndk block
+            content = content.replace('defaultConfig {', 'defaultConfig {\n        ndk { abiFilters += "arm64-v8a" }')
+        
+        with open(file_path, "w") as f:
+            f.write(content)
+        
+        print("Build file modified successfully!")
 
-    # 9. نصب Rust برای معماری ARM64
+    # 8. نصب Rust فقط برای ARM64
     - name: Install Rust Targets
       run: rustup target add aarch64-linux-android
 
-    # 10. مجوز اجرا
+    # 9. مجوز اجرا به Gradle
     - name: Grant execute permission
       run: chmod +x gradlew
 
-    # 11. ساخت فایل APK
-    # گزینه --no-parallel بسیار مهم است
+    # 10. ساخت فایل APK
     - name: Build Debug APK
-      run: ./gradlew assembleDebug --no-daemon --no-parallel --stacktrace
+      run: ./gradlew assembleDebug --stacktrace
 
-    # 12. آپلود فایل خروجی
+    # 11. آپلود فایل
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
