@@ -1,4 +1,4 @@
-name: Build APK (Swap Enabled)
+name: Build APK (Swap Enabled - DD Method)
 
 on:
   push:
@@ -10,18 +10,16 @@ jobs:
     runs-on: ubuntu-latest
 
     env:
-      # محدود کردن شدید حافظه جاوا به 2 گیگابایت (تا 5 گیگ برای Rust و سیستم بماند)
       GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx2048m -Dorg.gradle.daemon=false -Dkotlin.daemon.jvm.options=-Xmx1024m"
-      # تک‌هسته‌ای کردن کامپایل Rust
       CARGO_BUILD_JOBS: "1"
-      # کاهش مصرف رم کامپایلر Rust
       RUSTFLAGS: "-C codegen-units=1"
 
     steps:
-    # 1. ایجاد حافظه مجازی (SWAP) - راه نجات از کرش کردن
-    - name: Enable Swap Space
+    # 1. ایجاد حافظه مجازی (SWAP) با دستور پایدار dd
+    - name: Enable Swap Space (using dd)
       run: |
-        sudo fallocate -l 4G /swapfile
+        # استفاده از dd به جای fallocate برای جلوگیری از خطای "Text file busy"
+        sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
         sudo chmod 600 /swapfile
         sudo mkswap /swapfile
         sudo swapon /swapfile
@@ -71,13 +69,8 @@ jobs:
         with open(file_path, "r") as f:
             content = f.read()
         
-        # اصلاح نسخه NDK
         content = re.sub(r'ndkVersion\s*=\s*".*"', 'ndkVersion = "26.1.10909125"', content)
-        
-        # غیرفعال کردن Splits (بسیار مهم)
         content = content.replace('isEnable = true', 'isEnable = false')
-        
-        # اضافه کردن فیلتر ARM64 اگر وجود نداشته باشد
         if 'abiFilters' not in content:
             content = content.replace('defaultConfig {', 'defaultConfig {\n        ndk { abiFilters += "arm64-v8a" }')
             
@@ -93,7 +86,7 @@ jobs:
     - name: Grant execute permission
       run: chmod +x gradlew
 
-    # 11. ساخت فایل APK (بدون پارالل برای کاهش مصرف رم)
+    # 11. ساخت فایل APK
     - name: Build Debug APK
       run: ./gradlew assembleDebug --no-parallel --stacktrace
 
