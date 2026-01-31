@@ -1,4 +1,4 @@
-name: Build APK (Swap Enabled - DD Method)
+name: Build APK (Max Resource Limit)
 
 on:
   push:
@@ -8,23 +8,18 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    
+    # محدودیت سختگیرانه منابع
     env:
       GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx2048m -Dorg.gradle.daemon=false -Dkotlin.daemon.jvm.options=-Xmx1024m"
       CARGO_BUILD_JOBS: "1"
-      RUSTFLAGS: "-C codegen-units=1"
+      RUSTFLAGS: "-C codegen-units=1 -C linker-args=-Wl,-O1" # لینک کردن بهینه شده
+      # استفاده از یک متغیر برای مدیریت منابع
+      RUST_CARGO_OPTS: " --jobs 1 --config profile.release.lto=true" # LTO برای لینک بهتر
 
     steps:
-    # 1. ایجاد حافظه مجازی (SWAP) با دستور پایدار dd
-    - name: Enable Swap Space (using dd)
-      run: |
-        # استفاده از dd به جای fallocate برای جلوگیری از خطای "Text file busy"
-        sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
-        sudo chmod 600 /swapfile
-        sudo mkswap /swapfile
-        sudo swapon /swapfile
-        sudo swapon --show
-
+    # مرحله 1: دیگر Swap ایجاد نمی‌کنیم
+    
     # 2. دانلود سورس‌کد
     - uses: actions/checkout@v4
       with:
@@ -78,7 +73,7 @@ jobs:
             f.write(content)
         print("Build file patched successfully.")
 
-    # 9. نصب Rust فقط برای ARM64
+    # 9. نصب Rust فقط برای ARM64 (حذف بقیه برای جلوگیری از تداخل)
     - name: Install Rust Targets
       run: rustup target add aarch64-linux-android
 
@@ -87,6 +82,7 @@ jobs:
       run: chmod +x gradlew
 
     # 11. ساخت فایل APK
+    # استفاده از متغیر محیطی RUST_CARGO_OPTS در این مرحله اعمال می‌شود
     - name: Build Debug APK
       run: ./gradlew assembleDebug --no-parallel --stacktrace
 
