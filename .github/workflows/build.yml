@@ -1,4 +1,4 @@
-name: Build APK (ARM64 Fixed)
+name: Build APK (Memory Optimized)
 
 on:
   push:
@@ -8,10 +8,13 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-
-    # تنظیمات برای مدیریت حافظه و جلوگیری از کرش کردن
+    
+    # تنظیمات حیاتی برای مدیریت حافظه
     env:
+      # محدود کردن حافظه جاوا و غیرفعال کردن Daemon
       GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx3072m -Dorg.gradle.daemon=false"
+      # جلوگیری از کامپایل همزمان چندین فایل Rust برای کاهش فشار روی رم (بسیار مهم)
+      CARGO_BUILD_JOBS: "1"
 
     steps:
     # 1. دانلود سورس‌کد
@@ -30,66 +33,56 @@ jobs:
     - name: Setup Android SDK
       uses: android-actions/setup-android@v3
 
-    # 4. نصب ابزارهای پیش‌نیاز (ninja, nasm, python)
+    # 4. نصب ابزارهای پیش‌نیاز
     - name: Install Build Dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y ninja-build nasm pkg-config build-essential python3
 
-    # 5. نصب CMake پایدار (3.22.1)
+    # 5. نصب CMake پایدار
     - name: Install Android CMake
       run: |
         sdkmanager --install "cmake;3.22.1"
         echo "$ANDROID_SDK_ROOT/cmake/3.22.1/bin" >> $GITHUB_PATH
 
-    # 6. نصب NDK پایدار (نسخه 26)
+    # 6. نصب NDK پایدار
     - name: Install NDK
       run: |
         yes | sdkmanager --install "ndk;26.1.10909125"
         echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/26.1.10909125" >> $GITHUB_ENV
 
-    # 7. اصلاح فایل build.gradle.kts با پایتون (حیاتی‌ترین مرحله)
-    # این اسکریپت تداخل splits را حل می‌کند و نسخه NDK را اصلاح می‌کند
+    # 7. اصلاح فایل build.gradle.kts با پایتون
     - name: Fix build.gradle.kts
       shell: python
       run: |
         import re
-        
         file_path = "app/build.gradle.kts"
+        with open(file_path, "r") as f: content = f.read()
         
-        with open(file_path, "r") as f:
-            content = f.read()
-        
-        # 1. تغییر نسخه NDK به 26
+        # 1. تغییر نسخه NDK
         content = re.sub(r'ndkVersion\s*=\s*".*"', 'ndkVersion = "26.1.10909125"', content)
-        
-        # 2. غیرفعال کردن Splits (حل مشکل Conflicting configuration)
-        # در فایل اصلی isEnable = true است، ما آن را false می‌کنیم
+        # 2. غیرفعال کردن Splits
         content = content.replace('isEnable = true', 'isEnable = false')
-        
-        # 3. اضافه کردن تنظیمات ARM64 به defaultConfig
+        # 3. اضافه کردن فیلتر ARM64
         if 'abiFilters' not in content:
-            # پیدا کردن انتهای بلاک defaultConfig و اضافه کردن ndk block
             content = content.replace('defaultConfig {', 'defaultConfig {\n        ndk { abiFilters += "arm64-v8a" }')
-        
-        with open(file_path, "w") as f:
-            f.write(content)
-        
-        print("Build file modified successfully!")
+
+        with open(file_path, "w") as f: f.write(content)
+        print("Build file modified for ARM64 and NDK26.")
 
     # 8. نصب Rust فقط برای ARM64
     - name: Install Rust Targets
       run: rustup target add aarch64-linux-android
 
-    # 9. مجوز اجرا به Gradle
+    # 9. مجوز اجرا
     - name: Grant execute permission
       run: chmod +x gradlew
 
-    # 10. ساخت فایل APK
+    # 10. ساخت فایل APK با تنظیمات ضد-کرش
     - name: Build Debug APK
-      run: ./gradlew assembleDebug --stacktrace
+      run: ./gradlew assembleDebug --no-parallel --stacktrace
 
-    # 11. آپلود فایل
+    # 11. آپلود فایل نهایی
     - name: Upload APK
       uses: actions/upload-artifact@v4
       with:
